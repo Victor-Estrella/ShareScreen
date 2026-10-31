@@ -1078,3 +1078,10 @@ function needUnlock() {
   } catch {}
   join();
 })();
+
+/* ---------- Sinal de vida (mantém o servidor acordado) ---------- */
+// Hospedagens gratuitas (Render) suspendem o servidor depois de ~15 min sem tráfego recebido.
+// Enquanto você está numa sala, manda uma mensagem mínima a cada 25s para isso não acontecer.
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN && !$('#app').hidden) send({ type: 'ping' });
+}, 25000);

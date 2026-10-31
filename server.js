@@ -59,6 +59,8 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
 const rooms = new Map(); // roomId -> Map(peerId -> ws)
 
+const log = (text) => console.log(`[${new Date().toISOString()}] ${text}`);
+
 function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
@@ -75,16 +77,20 @@ function leave(ws) {
 }
 
 wss.on('connection', (ws) => {
-  ws.isAlive = true;
-  ws.on('pong', () => (ws.isAlive = true));
+  ws.missedPings = 0;
+  ws.on('pong', () => (ws.missedPings = 0));
 
   ws.on('message', (raw) => {
+    ws.missedPings = 0; // qualquer mensagem também prova que a conexão está viva
     let msg;
     try {
       msg = JSON.parse(raw);
     } catch {
       return;
     }
+    // Sinal de vida do navegador. Serve para a hospedagem (ex.: Render grátis) não achar que o serviço
+    // está parado: ela só conta como atividade mensagens recebidas pelo WebSocket, não os pings do servidor.
+    if (msg.type === 'ping') return;
 
     if (msg.type === 'join' && !ws.room) {
       const room = String(msg.room || '').trim().toLowerCase().slice(0, 40);
@@ -132,18 +138,24 @@ wss.on('connection', (ws) => {
     }
   });
 
-  ws.on('close', () => leave(ws));
+  // code 1000/1001 = saiu normalmente (fechou a aba, recarregou); 1006 = a conexão simplesmente caiu (rede)
+  ws.on('close', (code) => {
+    if (ws.room) log(`saiu: "${ws.name}" (sala ${ws.room}) code=${code}`);
+    leave(ws);
+  });
   ws.on('error', () => leave(ws));
 });
 
-// Remove conexões mortas
+// Remove conexões mortas. Só derruba depois de 2 pings sem resposta (~30s): quem está compartilhando
+// a tela satura o envio de internet e a resposta de um ping pode atrasar sem a conexão estar morta.
 setInterval(() => {
   for (const ws of wss.clients) {
-    if (!ws.isAlive) {
+    if (ws.missedPings >= 2) {
+      log(`ping-timeout: servidor derrubou "${ws.name}" (sala ${ws.room}), sem resposta há ~30s`);
       ws.terminate();
       continue;
     }
-    ws.isAlive = false;
+    ws.missedPings++;
     ws.ping();
   }
 }, 15000);
