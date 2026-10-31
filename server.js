@@ -91,8 +91,20 @@ wss.on('connection', (ws) => {
       if (!room) return;
       let members = rooms.get(room);
       if (!members) rooms.set(room, (members = new Map()));
+      // Mesma aba entrando de novo (recarregou a página): derruba a conexão antiga na hora
+      const cid = String(msg.cid || '').slice(0, 40);
+      if (cid) {
+        for (const other of [...members.values()]) {
+          if (other.cid === cid) {
+            send(other, { type: 'replaced' });
+            leave(other);
+            other.close();
+          }
+        }
+      }
       if (members.size >= MAX_PEERS_PER_ROOM) return send(ws, { type: 'full' });
 
+      ws.cid = cid;
       ws.id = crypto.randomUUID().slice(0, 8);
       ws.name = name;
       ws.room = room;
@@ -133,8 +145,8 @@ setInterval(() => {
     ws.isAlive = false;
     ws.ping();
   }
-}, 30000);
+}, 15000);
 
 server.listen(PORT, () => {
-  console.log(`ShareScreen rodando em http://localhost:${PORT}`);
+  console.log(`Telão rodando em http://localhost:${PORT}`);
 });

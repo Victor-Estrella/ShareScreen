@@ -3,7 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ShareScreen</title>
+  <title>Telão</title>
+  <meta name="description" content="Compartilhe sua tela com os amigos, direto no navegador." />
+  <meta name="theme-color" content="#1e1f22" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&display=swap" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -11,16 +16,37 @@
   <!-- Tela de entrada -->
   <main id="lobby" class="lobby">
     <form id="joinForm" class="card">
-      <h1>ShareScreen</h1>
-      <p class="muted">Crie uma sala e mande o link para os amigos.</p>
-      <label>Seu nome
-        <input id="nameInput" maxlength="24" placeholder="Como te chamam?" required autocomplete="off" />
+      <div class="brand">
+        <span class="logo"><i class="ti ti-device-desktop-share"></i></span>
+        <h1>Telão</h1>
+      </div>
+      <p id="invited" class="invited" hidden><i class="ti ti-mail-opened"></i><span></span></p>
+      <p class="tagline">Mostre sua tela para os amigos e veja a deles, direto no navegador.</p>
+
+      <label class="field">
+        <span>Seu nome</span>
+        <div class="input">
+          <i class="ti ti-user"></i>
+          <input id="nameInput" maxlength="24" placeholder="Como te chamam?" required autocomplete="off" />
+        </div>
       </label>
-      <label>Sala
-        <input id="roomInput" maxlength="40" placeholder="código da sala" required autocomplete="off" />
+      <label class="field">
+        <span>Código da sala</span>
+        <div class="input">
+          <i class="ti ti-hash"></i>
+          <input id="roomInput" maxlength="40" placeholder="ex.: noite-de-jogo" required autocomplete="off" spellcheck="false" />
+          <button type="button" id="shuffleRoom" class="icon-btn" title="Gerar outro código" aria-label="Gerar outro código"><i class="ti ti-dice-3"></i></button>
+        </div>
       </label>
-      <button class="btn primary" type="submit"><i class="ti ti-door-enter"></i><span>Entrar na sala</span></button>
+
+      <button class="btn primary big" type="submit"><i class="ti ti-door-enter"></i><span>Entrar na sala</span></button>
       <p id="lobbyError" class="error" hidden></p>
+
+      <ul class="perks">
+        <li><i class="ti ti-screen-share"></i>Tela e áudio</li>
+        <li><i class="ti ti-users"></i>Até 8 pessoas</li>
+        <li><i class="ti ti-bolt"></i>Sem cadastro</li>
+      </ul>
     </form>
   </main>
 

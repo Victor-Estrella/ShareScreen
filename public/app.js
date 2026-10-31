@@ -36,11 +36,24 @@ function randomRoom() {
   return Math.random().toString(36).slice(2, 8);
 }
 
+if (params.get('room')) {
+  $('#invited').hidden = false;
+  $('#invited span').textContent = `Você vai entrar na sala ${$('#roomInput').value}`;
+}
+$('#shuffleRoom').onclick = () => {
+  $('#roomInput').value = randomRoom();
+  $('#roomInput').focus();
+};
+
+// Celulares não conseguem compartilhar a tela, mas podem entrar para assistir
+const canShare = !!navigator.mediaDevices?.getDisplayMedia;
+if (!canShare) {
+  $('#shareBtn').hidden = true;
+  $('.quality').hidden = true;
+}
+
 $('#joinForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    return showError('Seu navegador não suporta compartilhamento de tela, ou a página não está em HTTPS/localhost.');
-  }
   myName = $('#nameInput').value.trim();
   roomId = $('#roomInput').value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
   if (!myName || !roomId) return;
@@ -58,7 +71,19 @@ function showError(msg) {
   el.hidden = false;
 }
 
+// Identidade desta aba: sobrevive a recarregar a página, mas não é compartilhada entre abas
+function tabId() {
+  try {
+    let id = sessionStorage.getItem('cid');
+    if (!id) sessionStorage.setItem('cid', (id = Math.random().toString(36).slice(2) + Date.now().toString(36)));
+    return id;
+  } catch {
+    return '';
+  }
+}
+
 async function join() {
+  if (ws && ws.readyState <= WebSocket.OPEN) return; // evita entrar duas vezes (duplo clique)
   // Servidor de sinalização: o configurado em config.js ou o mesmo domínio da página
   const base = (window.SIGNAL_URL || location.origin).replace(/\/+$/, '');
   try {
@@ -67,7 +92,7 @@ async function join() {
   } catch {}
 
   ws = new WebSocket(base.replace(/^http/, 'ws'));
-  ws.onopen = () => ws.send(JSON.stringify({ type: 'join', room: roomId, name: myName }));
+  ws.onopen = () => ws.send(JSON.stringify({ type: 'join', room: roomId, name: myName, cid: tabId() }));
   ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
   ws.onerror = () => showError('Não foi possível conectar ao servidor.');
   ws.onclose = () => {
@@ -89,12 +114,19 @@ function onServerMessage(msg) {
       ws.close();
       showError('Essa sala está cheia.');
       break;
+    case 'replaced':
+      // esta aba foi substituída por outra igual (ex.: página recarregada)
+      ws.onclose = null;
+      ws.close();
+      alert('Você entrou nesta sala em outra janela.');
+      location.href = location.pathname;
+      break;
     case 'joined':
       myId = msg.id;
       $('#lobby').hidden = true;
       $('#app').hidden = false;
       $('#roomName').textContent = roomId;
-      history.replaceState(null, '', `?room=${roomId}`);
+      history.pushState(null, '', `?room=${roomId}`); // o "voltar" do navegador sai da sala
       msg.peers.forEach((p) => createPeer(p.id, p.name));
       renderMembers();
       break;
@@ -103,6 +135,7 @@ function onServerMessage(msg) {
       if (existing) existing.name = msg.name;
       else createPeer(msg.id, msg.name);
       renderMembers();
+      if (micOn) broadcast({ type: 'mic-state', on: true }); // quem chegou agora fica sabendo
       break;
     }
     case 'peer-left':
@@ -113,6 +146,10 @@ function onServerMessage(msg) {
       break;
     case 'broadcast':
       if (msg.data.type === 'share-stopped') dropStream(peers.get(msg.from), msg.data.streamId);
+      else if (msg.data.type === 'mic-state' && peers.has(msg.from)) {
+        peers.get(msg.from).micOn = !!msg.data.on;
+        renderMembers();
+      }
       break;
   }
 }
@@ -128,6 +165,7 @@ function createPeer(id, name) {
     polite: myId > id, // um lado cede em caso de colisão de ofertas
     makingOffer: false,
     ignoreOffer: false,
+    micOn: false, // estado do microfone dessa pessoa (avisado por ela)
     streams: new Map(), // streamId -> { stream, video, tile }
   };
   peers.set(id, peer);
@@ -432,6 +470,8 @@ $('#micBtn').onclick = async () => {
   micStream.getAudioTracks().forEach((t) => (t.enabled = micOn));
   setBtn($('#micBtn'), micOn ? 'microphone' : 'microphone-off', 'Microfone');
   $('#micBtn').classList.toggle('on', micOn);
+  broadcast({ type: 'mic-state', on: micOn });
+  renderMembers();
 };
 
 /* ---------- Quem está falando ---------- */
@@ -491,10 +531,11 @@ function renderMembers() {
   const list = $('#members');
   list.replaceChildren();
   const everyone = [
-    { id: 'me', name: `${myName} (você)`, sharing: !!screenStream },
+    { id: 'me', name: `${myName} (você)`, mic: micOn, sharing: !!screenStream },
     ...[...peers.values()].map((p) => ({
       id: p.id,
       name: p.name,
+      mic: p.micOn,
       sharing: [...p.streams.values()].some((s) => s.tile),
     })),
   ];
@@ -509,6 +550,12 @@ function renderMembers() {
     name.className = 'name';
     name.textContent = m.name;
     li.append(av, name);
+    if (!m.mic) {
+      const muted = document.createElement('i');
+      muted.className = 'ti ti-microphone-off mute-icon';
+      muted.title = 'Microfone desligado';
+      li.appendChild(muted);
+    }
     if (m.sharing) {
       const live = document.createElement('span');
       live.className = 'live';
@@ -534,9 +581,17 @@ $('#copyLink').onclick = async () => {
   setTimeout(() => setBtn($('#copyLink'), 'copy', 'Copiar convite'), 1500);
 };
 
+// Sair volta para a tela inicial, já com o código desta sala (fácil de entrar de novo)
 $('#leaveBtn').onclick = () => {
   if (ws) ws.onclose = null;
-  location.href = location.pathname;
+  location.href = `${location.pathname}?room=${encodeURIComponent(roomId)}`;
 };
 
-window.addEventListener('beforeunload', () => ws?.close());
+// Botão "voltar" do navegador também sai da sala
+window.addEventListener('popstate', () => {
+  if ($('#app').hidden) return;
+  if (ws) ws.onclose = null;
+  location.reload();
+});
+
+window.addEventListener('pagehide', () => ws?.close());

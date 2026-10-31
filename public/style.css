@@ -74,29 +74,95 @@ input, select {
 select { width: auto; cursor: pointer; }
 
 /* Lobby */
-.lobby { min-height: 100%; display: grid; place-items: center; padding: 16px; }
-.card {
-  width: min(420px, 100%);
-  background: var(--side);
-  border-radius: 10px;
-  padding: 28px;
+.lobby {
+  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
-  gap: 16px;
-  box-shadow: 0 8px 30px rgb(0 0 0 / .35);
+  place-items: center;
+  padding: 24px 16px;
+  background:
+    radial-gradient(60rem 36rem at 15% -10%, rgb(88 101 242 / .28), transparent 60%),
+    radial-gradient(48rem 32rem at 105% 110%, rgb(35 165 89 / .16), transparent 60%),
+    var(--dark);
 }
-.card h1 { margin: 0; font-size: 26px; }
+.card {
+  width: min(440px, 100%);
+  background: rgb(43 45 49 / .86);
+  border: 1px solid rgb(255 255 255 / .07);
+  border-radius: 18px;
+  padding: 32px;
+  display: grid;
+  gap: 18px;
+  box-shadow: 0 24px 60px rgb(0 0 0 / .45);
+  backdrop-filter: blur(10px);
+}
 .card p { margin: 0; }
-.card label { display: grid; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; }
-.card input { text-transform: none; font-weight: 400; color: var(--text); font-size: 15px; }
+
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand h1 { margin: 0; font: 800 32px/1 "Sora", "Segoe UI", system-ui, sans-serif; letter-spacing: -.02em; }
+.logo {
+  width: 46px; height: 46px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #5865f2, #8b5cf6);
+  box-shadow: 0 8px 20px rgb(88 101 242 / .45);
+  font-size: 26px; color: #fff;
+}
+.tagline { color: var(--muted); font-size: 15px; line-height: 1.5; }
+.invited {
+  display: flex; align-items: center; gap: 8px;
+  width: fit-content; max-width: 100%;
+  background: rgb(88 101 242 / .16); color: #c9cdfb;
+  border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600;
+}
+.invited span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.field { display: grid; gap: 8px; }
+.field > span { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.input {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--dark);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 0 6px 0 14px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.input:focus-within { border-color: var(--blurple); box-shadow: 0 0 0 3px rgb(88 101 242 / .25); }
+.input > .ti { color: var(--muted); font-size: 19px; }
+.input input { flex: 1; min-width: 0; background: transparent; padding: 13px 0; font-size: 16px; outline: none; }
+.icon-btn {
+  display: grid; place-items: center; flex: none;
+  width: 36px; height: 36px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); font-size: 20px; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.icon-btn:hover { background: #35373c; color: var(--text); }
+.icon-btn:focus-visible { outline: 2px solid #00a8fc; }
+
+.btn.big { padding: 14px 18px; font-size: 16px; border-radius: 10px; }
+
+.perks {
+  list-style: none; margin: 2px 0 0; padding: 18px 0 0;
+  border-top: 1px solid rgb(255 255 255 / .07);
+  display: flex; flex-wrap: wrap; gap: 8px 18px;
+  color: var(--muted); font-size: 13px;
+}
+.perks li { display: inline-flex; align-items: center; gap: 6px; }
+.perks .ti { font-size: 17px; color: #8b93f8; }
 
 /* App */
-.app { height: 100%; display: grid; grid-template-columns: 240px 1fr; }
+.app { height: 100%; height: 100dvh; display: grid; grid-template-columns: 240px 1fr; grid-template-rows: minmax(0, 1fr); }
 
-.sidebar { background: var(--side); display: flex; flex-direction: column; min-height: 0; }
+.sidebar { background: var(--side); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .room-title { padding: 16px; display: grid; gap: 6px; border-bottom: 1px solid var(--dark); }
 .room-title strong { font-size: 18px; word-break: break-all; }
 .section { padding: 16px 16px 6px; font-weight: 700; letter-spacing: .02em; }
-.members { list-style: none; margin: 0; padding: 0 8px; overflow: auto; }
+.room-title, .section { flex: none; }
+.members {
+  list-style: none; margin: 0; padding: 0 8px 8px;
+  flex: 1; min-height: 0; overflow-y: auto; /* só a lista rola */
+  scrollbar-width: thin; scrollbar-color: #1a1b1e transparent;
+}
 .members li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; }
 .members li:hover { background: #35373c; }
 .avatar {
@@ -104,6 +170,7 @@ select { width: auto; cursor: pointer; }
   display: grid; place-items: center; flex: none;
   font-weight: 700; color: #fff;
 }
+.mute-icon { color: #f23f43; font-size: 17px; flex: none; }
 .avatar { transition: box-shadow .12s; }
 .members li.speaking .avatar { box-shadow: 0 0 0 2px var(--side), 0 0 0 4px var(--green); }
 .members .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
@@ -148,6 +215,7 @@ select { width: auto; cursor: pointer; }
   display: flex; gap: 6px; opacity: 0; transition: opacity .15s;
 }
 .tile:hover .tools, .tile:focus-within .tools { opacity: 1; }
+@media (hover: none) { .tile .tools { opacity: 1; } } /* toque: não existe "passar o mouse" */
 .tile .tools .btn { background: rgb(0 0 0 / .7); padding: 6px 10px; font-size: 12px; }
 .tile .tools .btn:hover { background: rgb(0 0 0 / .9); }
 
@@ -157,6 +225,17 @@ select { width: auto; cursor: pointer; }
 }
 
 @media (max-width: 720px) {
-  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .sidebar { max-height: 38vh; }
+  .app { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .sidebar { max-height: 30vh; }
+  .grid { padding: 8px; gap: 8px; }
+  .tile { min-height: 180px; }
+}
+
+@media (max-width: 520px) {
+  .card { padding: 24px 20px; border-radius: 16px; }
+  .brand h1 { font-size: 28px; }
+  .controls { gap: 8px; padding: 10px; }
+  .controls .btn { padding: 10px 12px; }
+  .quality > span { display: none; } /* só o ícone, para caber */
+  .members .name { font-size: 14px; }
 }
