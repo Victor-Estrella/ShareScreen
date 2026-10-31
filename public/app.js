@@ -107,25 +107,40 @@ function joinFailed() {
   showError('Não foi possível conectar ao servidor.');
 }
 
+let joining = false; // há uma tentativa de entrada em andamento (inclui a espera pelo servidor acordar)
+
 async function join() {
-  if (ws && ws.readyState <= WebSocket.OPEN) return; // evita entrar duas vezes (duplo clique)
+  // Só uma tentativa por vez. O flag vale também durante o fetch abaixo, que no Render pode levar
+  // dezenas de segundos: sem ele, cliques repetidos criavam vários WebSockets ao mesmo tempo.
+  if (joining || (ws && ws.readyState <= WebSocket.OPEN)) return;
+  joining = true;
   $('#lobbyError').hidden = true;
   setBusy(true);
-  // Servidor de sinalização: o configurado em config.js (produção) ou o mesmo domínio da página
-  const base = (isLocalHost ? location.origin : window.SIGNAL_URL || location.origin).replace(/\/+$/, '');
-  try {
-    const res = await fetch(`${base}/ice`);
-    if (res.ok) iceServers = await res.json();
-  } catch {}
 
-  ws = new WebSocket(base.replace(/^http/, 'ws'));
-  ws.onopen = () => ws.send(JSON.stringify({ type: 'join', room: roomId, name: myName, cid: tabId() }));
-  ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
-  ws.onerror = joinFailed;
-  ws.onclose = () => {
-    // conexão caiu com a sala aberta: recarrega, e o app volta para a mesma sala sozinho
-    if (!$('#app').hidden) location.reload();
-  };
+  try {
+    // Servidor de sinalização: o configurado em config.js (produção) ou o mesmo domínio da página
+    const base = (isLocalHost ? location.origin : window.SIGNAL_URL || location.origin).replace(/\/+$/, '');
+    try {
+      const res = await fetch(`${base}/ice`);
+      if (res.ok) iceServers = await res.json();
+    } catch {}
+
+    // Os handlers usam `sock` (este socket), nunca a variável global `ws`, que pode apontar para outro
+    const sock = new WebSocket(base.replace(/^http/, 'ws'));
+    ws = sock;
+    sock.onopen = () => sock.send(JSON.stringify({ type: 'join', room: roomId, name: myName, cid: tabId() }));
+    sock.onmessage = (e) => sock === ws && onServerMessage(JSON.parse(e.data));
+    sock.onerror = () => sock === ws && joinFailed();
+    sock.onclose = () => {
+      // conexão caiu com a sala aberta: recarrega, e o app volta para a mesma sala sozinho
+      if (sock === ws && !$('#app').hidden) location.reload();
+    };
+  } catch (err) {
+    console.error(err);
+    joinFailed();
+  } finally {
+    joining = false; // a partir daqui a proteção é o readyState do socket
+  }
 }
 
 const send = (msg) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg));
