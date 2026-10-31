@@ -28,6 +28,10 @@ body {
 
 /* Botões e campos */
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   border: 0;
   border-radius: 6px;
   padding: 10px 16px;
@@ -45,6 +49,17 @@ body {
 .btn.danger:hover { background: var(--red-h); }
 .btn.on { background: var(--green); }
 .btn.small { padding: 5px 10px; font-size: 12px; }
+.btn .ti { font-size: 20px; line-height: 1; }
+.btn.small .ti { font-size: 15px; }
+
+.quality {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--dark); border-radius: 6px; padding: 0 4px 0 12px;
+  color: var(--muted); font-size: 13px; font-weight: 600;
+}
+.quality .ti { font-size: 18px; }
+.quality select { background: transparent; padding: 10px 8px; color: var(--text); font-weight: 600; }
+.quality select option { background: var(--dark); }
 .btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #00a8fc; outline-offset: 2px; }
 
 input, select {
@@ -89,8 +104,14 @@ select { width: auto; cursor: pointer; }
   display: grid; place-items: center; flex: none;
   font-weight: 700; color: #fff;
 }
+.avatar { transition: box-shadow .12s; }
+.members li.speaking .avatar { box-shadow: 0 0 0 2px var(--side), 0 0 0 4px var(--green); }
 .members .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.live { background: var(--red); color: #fff; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px; letter-spacing: .04em; }
+.live {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: var(--red); color: #fff; font-size: 10px; font-weight: 800;
+  padding: 2px 6px; border-radius: 4px; letter-spacing: .04em;
+}
 
 .stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .grid {
@@ -114,7 +135,9 @@ select { width: auto; cursor: pointer; }
   overflow: hidden;
   min-height: 200px;
 }
-.tile video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+.tile video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; cursor: pointer; }
+.tile:fullscreen { border-radius: 0; }
+.tile:fullscreen video { cursor: zoom-out; }
 .tile .label {
   position: absolute; left: 10px; bottom: 10px;
   background: rgb(0 0 0 / .65); padding: 3px 8px; border-radius: 4px;

@@ -19,6 +19,12 @@ let screenStream = null;
 let micStream = null;
 let micOn = false;
 let localTile = null;
+let localVideo = null;
+
+// Botão = ícone do Tabler + texto (só strings fixas, nunca dados de usuários)
+function setBtn(el, icon, text) {
+  el.innerHTML = `<i class="ti ti-${icon}"></i><span>${text}</span>`;
+}
 
 /* ---------- Lobby ---------- */
 
@@ -39,6 +45,10 @@ $('#joinForm').addEventListener('submit', (e) => {
   roomId = $('#roomInput').value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
   if (!myName || !roomId) return;
   localStorage.setItem('name', myName);
+  // criado aqui, dentro do clique, para o navegador permitir o áudio
+  try {
+    audioCtx = new AudioContext();
+  } catch {}
   join();
 });
 
@@ -204,23 +214,31 @@ function attachRemote(peer, stream) {
   renderStream(peer, entry);
 }
 
-// Mostra um tile só quando o stream tem vídeo (tela). Streams só com áudio (microfone) ficam ocultos.
+// Mostra um tile só quando o stream tem vídeo (tela). Streams só com áudio (microfone) ficam ocultos
+// e alimentam o indicador de quem está falando.
 function renderStream(peer, entry) {
   const hasVideo = entry.stream.getVideoTracks().length > 0;
+  const meterKey = `${peer.id}:${entry.stream.id}`;
+
   if (hasVideo && !entry.tile) {
-    entry.tile = makeTile(`${peer.name}`, entry.video, { remote: true });
+    entry.tile = makeTile(peer.name, entry.video, { remote: true });
     $('#grid').appendChild(entry.tile);
   } else if (!hasVideo && entry.tile) {
     entry.tile.remove();
     entry.tile = null;
     $('#sink').appendChild(entry.video);
   }
+
+  if (!hasVideo && entry.stream.getAudioTracks().length) addMeter(meterKey, peer.id, entry.stream);
+  else removeMeter(meterKey);
+
   renderMembers();
 }
 
 function dropStream(peer, streamId) {
   const entry = peer?.streams.get(streamId);
   if (!entry) return;
+  removeMeter(`${peer.id}:${streamId}`);
   entry.tile?.remove();
   entry.video.srcObject = null;
   entry.video.remove();
@@ -240,61 +258,113 @@ function makeTile(label, video, { remote }) {
 
   const tools = document.createElement('div');
   tools.className = 'tools';
+
   if (remote) {
     const mute = document.createElement('button');
     mute.className = 'btn';
-    mute.textContent = 'Silenciar';
+    setBtn(mute, 'volume', 'Silenciar');
     mute.onclick = () => {
       video.muted = !video.muted;
-      mute.textContent = video.muted ? 'Ativar som' : 'Silenciar';
+      video.muted ? setBtn(mute, 'volume-off', 'Ativar som') : setBtn(mute, 'volume', 'Silenciar');
     };
     tools.appendChild(mute);
   }
+
+  // Clicar na tela entra e sai da tela cheia
+  const isFull = () => document.fullscreenElement === tile;
+  const toggleFull = () => (isFull() ? document.exitFullscreen() : tile.requestFullscreen?.());
   const full = document.createElement('button');
   full.className = 'btn';
-  full.textContent = 'Tela cheia';
-  full.onclick = () => tile.requestFullscreen?.();
+  setBtn(full, 'arrows-maximize', 'Tela cheia');
+  full.onclick = toggleFull;
   tools.appendChild(full);
   tile.appendChild(tools);
 
-  video.ondblclick = () => tile.requestFullscreen?.();
+  video.onclick = toggleFull;
+  tile.onfullscreenchange = () =>
+    isFull() ? setBtn(full, 'arrows-minimize', 'Sair da tela cheia') : setBtn(full, 'arrows-maximize', 'Tela cheia');
   return tile;
 }
 
 /* ---------- Compartilhar tela ---------- */
 
 $('#shareBtn').onclick = () => (screenStream ? stopShare() : startShare());
+$('#switchBtn').onclick = switchShare;
 
-async function startShare() {
+function captureConstraints() {
   const q = QUALITY[$('#quality').value];
+  return {
+    video: { width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps } },
+    audio: true, // áudio do sistema/aba, se o navegador oferecer
+  };
+}
+
+async function pickScreen() {
   try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps } },
-      audio: true, // áudio do sistema/aba, se o navegador oferecer
-    });
+    const stream = await navigator.mediaDevices.getDisplayMedia(captureConstraints());
+    const [track] = stream.getVideoTracks();
+    track.contentHint = 'motion';
+    track.onended = stopShare; // botão "Parar compartilhamento" do navegador
+    return stream;
   } catch (err) {
     if (err.name !== 'NotAllowedError') alert('Não foi possível compartilhar a tela: ' + err.message);
-    return;
+    return null; // cancelou o seletor
   }
+}
 
-  const [track] = screenStream.getVideoTracks();
-  track.contentHint = 'motion';
-  track.onended = stopShare; // botão "Parar compartilhamento" do navegador
+async function startShare() {
+  const stream = await pickScreen();
+  if (!stream) return;
+  screenStream = stream;
 
-  const video = document.createElement('video');
-  video.autoplay = true;
-  video.muted = true; // não ouvir o próprio áudio
-  video.playsInline = true;
-  video.srcObject = screenStream;
-  localTile = makeTile(`${myName} (você)`, video, { remote: false });
+  localVideo = document.createElement('video');
+  localVideo.autoplay = true;
+  localVideo.muted = true; // não ouvir o próprio áudio
+  localVideo.playsInline = true;
+  localVideo.srcObject = screenStream;
+  localTile = makeTile(`${myName} (você)`, localVideo, { remote: false });
   $('#grid').appendChild(localTile);
 
   for (const { pc } of peers.values()) screenStream.getTracks().forEach((t) => pc.addTrack(t, screenStream));
 
-  $('#shareBtn').textContent = 'Parar de compartilhar';
+  setBtn($('#shareBtn'), 'screen-share-off', 'Parar de compartilhar');
   $('#shareBtn').classList.replace('primary', 'danger');
-  $('#quality').disabled = true;
+  $('#switchBtn').hidden = false;
   renderMembers();
+}
+
+// Troca a tela/janela sem parar a transmissão: o mesmo stream continua e quem assiste não vê corte.
+async function switchShare() {
+  if (!screenStream) return;
+  const next = await pickScreen();
+  if (!next) return;
+
+  const cur = screenStream;
+  const [oldVideo] = cur.getVideoTracks();
+  const [oldAudio] = cur.getAudioTracks();
+  const [newVideo] = next.getVideoTracks();
+  const [newAudio] = next.getAudioTracks();
+
+  oldVideo.onended = null;
+  for (const { pc } of peers.values()) {
+    const senders = pc.getSenders();
+    await senders.find((s) => s.track === oldVideo)?.replaceTrack(newVideo);
+    const audioSender = oldAudio && senders.find((s) => s.track === oldAudio);
+    if (oldAudio && newAudio) await audioSender?.replaceTrack(newAudio);
+    else if (oldAudio && audioSender) pc.removeTrack(audioSender);
+    else if (newAudio) pc.addTrack(newAudio, cur);
+  }
+
+  cur.removeTrack(oldVideo);
+  oldAudio && cur.removeTrack(oldAudio);
+  oldVideo.stop();
+  oldAudio?.stop();
+  cur.addTrack(newVideo);
+  newAudio && cur.addTrack(newAudio);
+
+  localVideo.srcObject = null;
+  localVideo.srcObject = cur;
+  for (const { pc } of peers.values()) applyBitrate(pc);
 }
 
 function stopShare() {
@@ -312,12 +382,22 @@ function stopShare() {
   broadcast({ type: 'share-stopped', streamId: stream.id });
 
   localTile?.remove();
-  localTile = null;
-  $('#shareBtn').textContent = 'Compartilhar tela';
+  localTile = localVideo = null;
+  setBtn($('#shareBtn'), 'screen-share', 'Compartilhar tela');
   $('#shareBtn').classList.replace('danger', 'primary');
-  $('#quality').disabled = false;
+  $('#switchBtn').hidden = true;
   renderMembers();
 }
+
+// Mudar a qualidade durante a transmissão
+$('#quality').onchange = async () => {
+  if (!screenStream) return;
+  const { video } = captureConstraints();
+  try {
+    await screenStream.getVideoTracks()[0].applyConstraints(video);
+  } catch {}
+  for (const { pc } of peers.values()) applyBitrate(pc);
+};
 
 function applyBitrate(pc) {
   const q = QUALITY[$('#quality').value];
@@ -344,14 +424,60 @@ $('#micBtn').onclick = async () => {
       return;
     }
     for (const { pc } of peers.values()) micStream.getTracks().forEach((t) => pc.addTrack(t, micStream));
+    addMeter('me', 'me', micStream);
     micOn = true;
   } else {
     micOn = !micOn;
   }
   micStream.getAudioTracks().forEach((t) => (t.enabled = micOn));
-  $('#micBtn').textContent = `Microfone: ${micOn ? 'ligado' : 'desligado'}`;
+  setBtn($('#micBtn'), micOn ? 'microphone' : 'microphone-off', 'Microfone');
   $('#micBtn').classList.toggle('on', micOn);
 };
+
+/* ---------- Quem está falando ---------- */
+
+let audioCtx = null;
+const meters = new Map(); // chave -> { owner, source, analyser, buf, lastLoud }
+const speaking = new Set(); // ids de quem está falando agora ('me' = eu)
+
+function addMeter(key, owner, stream) {
+  if (!audioCtx || meters.has(key) || !stream.getAudioTracks().length) return;
+  const source = audioCtx.createMediaStreamSource(stream);
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  source.connect(analyser);
+  meters.set(key, { owner, source, analyser, buf: new Uint8Array(analyser.fftSize), lastLoud: 0 });
+  audioCtx.state === 'suspended' && audioCtx.resume();
+}
+
+function removeMeter(key) {
+  const m = meters.get(key);
+  if (!m) return;
+  m.source.disconnect();
+  meters.delete(key);
+}
+
+setInterval(() => {
+  const now = performance.now();
+  const active = new Set();
+  for (const m of meters.values()) {
+    m.analyser.getByteTimeDomainData(m.buf);
+    let sum = 0;
+    for (const v of m.buf) sum += ((v - 128) / 128) ** 2;
+    if (Math.sqrt(sum / m.buf.length) > 0.02) m.lastLoud = now;
+    if (now - m.lastLoud < 300) active.add(m.owner); // segura 300ms para não piscar
+  }
+  const changed = active.size !== speaking.size || [...active].some((id) => !speaking.has(id));
+  if (changed) {
+    speaking.clear();
+    active.forEach((id) => speaking.add(id));
+    paintSpeaking();
+  }
+}, 80);
+
+function paintSpeaking() {
+  document.querySelectorAll('#members li').forEach((li) => li.classList.toggle('speaking', speaking.has(li.dataset.id)));
+}
 
 /* ---------- Lista de pessoas ---------- */
 
@@ -365,14 +491,16 @@ function renderMembers() {
   const list = $('#members');
   list.replaceChildren();
   const everyone = [
-    { name: `${myName} (você)`, sharing: !!screenStream },
+    { id: 'me', name: `${myName} (você)`, sharing: !!screenStream },
     ...[...peers.values()].map((p) => ({
+      id: p.id,
       name: p.name,
       sharing: [...p.streams.values()].some((s) => s.tile),
     })),
   ];
   for (const m of everyone) {
     const li = document.createElement('li');
+    li.dataset.id = m.id;
     const av = document.createElement('div');
     av.className = 'avatar';
     av.style.background = colorFor(m.name);
@@ -384,12 +512,13 @@ function renderMembers() {
     if (m.sharing) {
       const live = document.createElement('span');
       live.className = 'live';
-      live.textContent = 'AO VIVO';
+      live.innerHTML = '<i class="ti ti-broadcast"></i>AO VIVO';
       li.appendChild(live);
     }
     list.appendChild(li);
   }
   $('#count').textContent = everyone.length;
+  paintSpeaking();
 }
 
 /* ---------- Convite / sair ---------- */
@@ -398,16 +527,16 @@ $('#copyLink').onclick = async () => {
   const url = `${location.origin}/?room=${roomId}`;
   try {
     await navigator.clipboard.writeText(url);
-    $('#copyLink').textContent = 'Copiado!';
+    setBtn($('#copyLink'), 'check', 'Copiado!');
   } catch {
     prompt('Copie o link:', url);
   }
-  setTimeout(() => ($('#copyLink').textContent = 'Copiar convite'), 1500);
+  setTimeout(() => setBtn($('#copyLink'), 'copy', 'Copiar convite'), 1500);
 };
 
 $('#leaveBtn').onclick = () => {
   if (ws) ws.onclose = null;
-  location.href = '/';
+  location.href = location.pathname;
 };
 
 window.addEventListener('beforeunload', () => ws?.close());
