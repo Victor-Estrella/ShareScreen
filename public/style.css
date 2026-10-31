@@ -102,11 +102,9 @@ select { width: auto; cursor: pointer; }
 .brand h1 { margin: 0; font: 800 32px/1 "Sora", "Segoe UI", system-ui, sans-serif; letter-spacing: -.02em; }
 .logo {
   width: 46px; height: 46px; flex: none;
-  display: grid; place-items: center;
+  display: block;
   border-radius: 14px;
-  background: linear-gradient(135deg, #5865f2, #8b5cf6);
   box-shadow: 0 8px 20px rgb(88 101 242 / .45);
-  font-size: 26px; color: #fff;
 }
 .tagline { color: var(--muted); font-size: 15px; line-height: 1.5; }
 .invited {
