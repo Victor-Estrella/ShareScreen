@@ -11,6 +11,6 @@ COPY public ./public
 
 USER node
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost:3000/ice >/dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost:${PORT:-3000}/ice >/dev/null || exit 1
 
 CMD ["node", "server.js"]
