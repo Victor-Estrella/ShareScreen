@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: sharescreen-signal
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /ice
+    # Opcional: servidor TURN para redes difíceis (4G, CGNAT)
+    # envVars:
+    #   - key: TURN_URL
+    #     value: turn:seu-turn:3478
+    #   - key: TURN_USER
+    #     sync: false
+    #   - key: TURN_PASS
+    #     sync: false

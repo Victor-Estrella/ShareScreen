@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ShareScreen</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Tela de entrada -->
+  <main id="lobby" class="lobby">
+    <form id="joinForm" class="card">
+      <h1>ShareScreen</h1>
+      <p class="muted">Crie uma sala e mande o link para os amigos.</p>
+      <label>Seu nome
+        <input id="nameInput" maxlength="24" placeholder="Como te chamam?" required autocomplete="off" />
+      </label>
+      <label>Sala
+        <input id="roomInput" maxlength="40" placeholder="código da sala" required autocomplete="off" />
+      </label>
+      <button class="btn primary" type="submit">Entrar na sala</button>
+      <p id="lobbyError" class="error" hidden></p>
+    </form>
+  </main>
+
+  <!-- Sala -->
+  <div id="app" class="app" hidden>
+    <aside class="sidebar">
+      <div class="room-title">
+        <span class="muted small">SALA</span>
+        <strong id="roomName"></strong>
+        <button id="copyLink" class="btn small">Copiar convite</button>
+      </div>
+      <div class="muted small section">NA SALA — <span id="count">1</span></div>
+      <ul id="members" class="members"></ul>
+    </aside>
+
+    <section class="stage">
+      <div id="grid" class="grid">
+        <div id="empty" class="empty">
+          <p>Ninguém está compartilhando a tela.</p>
+          <p class="muted">Clique em <b>Compartilhar tela</b> para começar.</p>
+        </div>
+      </div>
+
+      <footer class="controls">
+        <select id="quality" title="Qualidade da transmissão">
+          <option value="720p30">720p · 30fps</option>
+          <option value="1080p30" selected>1080p · 30fps</option>
+          <option value="1080p60">1080p · 60fps</option>
+        </select>
+        <button id="micBtn" class="btn">Microfone: desligado</button>
+        <button id="shareBtn" class="btn primary">Compartilhar tela</button>
+        <button id="leaveBtn" class="btn danger">Sair</button>
+      </footer>
+    </section>
+  </div>
+
+  <!-- elementos de mídia sem vídeo (ex.: só microfone) ficam aqui -->
+  <div id="sink" hidden></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

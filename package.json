@@ -1,0 +1,12 @@
+{
+  "name": "share-screen",
+  "version": "1.0.0",
+  "description": "Compartilhamento de tela em salas, estilo Discord (WebRTC)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
