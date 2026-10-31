@@ -325,6 +325,7 @@ function dropStream(peer, streamId) {
   const entry = peer?.streams.get(streamId);
   if (!entry) return;
   removeMeter(`${peer.id}:${streamId}`);
+  dropAudioRoute(entry);
   entry.tile?.remove();
   entry.video.srcObject = null;
   entry.video.remove();
@@ -774,10 +775,49 @@ const vol = {
 };
 
 // Voz (stream só com áudio) e transmissão (stream com vídeo) têm volumes separados
+// O volume de um <video>/<audio> não passa de 100%. Para aumentar até 200%, o áudio de quem chega
+// passa por um GainNode do WebAudio (e o elemento fica mudo, só puxando o stream).
+// Se o WebAudio ainda não está liberado (aba sem clique), usa o volume normal do elemento (até 100%).
+function ensureAudioRoute(entry) {
+  if (!audioCtx || audioCtx.state !== 'running') return;
+  const track = entry.stream.getAudioTracks()[0];
+  if (!track) return dropAudioRoute(entry);
+  if (entry.routedTrack === track) return;
+  dropAudioRoute(entry);
+  try {
+    const source = audioCtx.createMediaStreamSource(new MediaStream([track]));
+    const gain = audioCtx.createGain();
+    source.connect(gain);
+    gain.connect(audioCtx.destination);
+    entry.route = { source, gain };
+    entry.gain = gain;
+    entry.routedTrack = track;
+    entry.video.muted = true;
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function dropAudioRoute(entry) {
+  if (entry.route) {
+    entry.route.source.disconnect();
+    entry.route.gain.disconnect();
+  }
+  entry.route = entry.gain = entry.routedTrack = null;
+  entry.video.muted = false;
+}
+
 function applyPeerVolumes(peer) {
+  if (audioCtx && !audioCtx.onstatechange) {
+    // quando o áudio for liberado (primeiro clique), passa tudo para o amplificador
+    audioCtx.onstatechange = () => audioCtx.state === 'running' && peers.forEach((p) => applyPeerVolumes(p));
+  }
   for (const entry of peer.streams.values()) {
+    ensureAudioRoute(entry);
     const isScreen = entry.stream.getVideoTracks().length > 0;
-    entry.video.volume = vol.get(`${isScreen ? 'stream' : 'voice'}:${peer.name}`) / 100;
+    const v = vol.get(`${isScreen ? 'stream' : 'voice'}:${peer.name}`) / 100;
+    if (entry.gain) entry.gain.gain.value = v;
+    else entry.video.volume = Math.min(v, 1);
   }
 }
 
@@ -787,7 +827,7 @@ function peerMenu(peer) {
       label: 'Voz',
       icons: ['microphone', 'microphone-off'],
       value: vol.get(`voice:${peer.name}`),
-      max: 100,
+      max: 200, // acima de 100% amplifica (útil se a pessoa fala baixo)
       onChange: (v) => {
         vol.set(`voice:${peer.name}`, v);
         applyPeerVolumes(peer);
@@ -799,7 +839,7 @@ function peerMenu(peer) {
       label: 'Transmissão',
       icons: ['volume', 'volume-off'],
       value: vol.get(`stream:${peer.name}`),
-      max: 100,
+      max: 200,
       onChange: (v) => {
         vol.set(`stream:${peer.name}`, v);
         applyPeerVolumes(peer);
