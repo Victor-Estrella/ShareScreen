@@ -4,6 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
@@ -147,6 +148,22 @@ setInterval(() => {
   }
 }, 15000);
 
+// Endereços IPv4 desta máquina na rede local (para abrir pelo celular)
+function networkAddresses() {
+  const out = [];
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    for (const i of list || []) {
+      if (i.family === 'IPv4' && !i.internal) out.push({ name, address: i.address });
+    }
+  }
+  return out;
+}
+
 server.listen(PORT, () => {
-  console.log(`Telão rodando em http://localhost:${PORT}`);
+  console.log('\n  Telão rodando\n');
+  console.log(`  Local:    http://localhost:${PORT}`);
+  const nets = networkAddresses();
+  for (const n of nets) console.log(`  Network:  http://${n.address}:${PORT}   (${n.name})`);
+  if (!nets.length) console.log('  Network:  nenhuma rede encontrada');
+  console.log('\n  Pelo celular (http) dá para assistir; compartilhar tela e microfone exigem HTTPS.\n');
 });

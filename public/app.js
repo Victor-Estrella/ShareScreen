@@ -18,6 +18,7 @@ const peers = new Map(); // id -> { id, name, pc, polite, makingOffer, ignoreOff
 let screenStream = null;
 let micStream = null;
 let micOn = false;
+let micGain = null; // GainNode do meu microfone
 let localTile = null;
 let localVideo = null;
 
@@ -66,6 +67,8 @@ $('#joinForm').addEventListener('submit', (e) => {
 });
 
 function showError(msg) {
+  document.documentElement.classList.remove('rejoining'); // não conseguiu voltar: mostra a tela de entrada
+  setBusy(false);
   const el = $('#lobbyError');
   el.textContent = msg;
   el.hidden = false;
@@ -82,10 +85,34 @@ function tabId() {
   }
 }
 
+// Rodando em localhost / rede local (ex.: celular acessando o IP do PC): usa o servidor local
+const isLocalHost = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
+
+// Botão "Entrar" ocupado enquanto conecta (o servidor gratuito do Render pode demorar a acordar)
+function setBusy(on, text = 'Entrando…') {
+  const b = $('#joinForm button[type="submit"]');
+  b.disabled = on;
+  on ? setBtn(b, 'loader-2', text) : setBtn(b, 'door-enter', 'Entrar na sala');
+  b.querySelector('.ti')?.classList.toggle('spin', on);
+}
+
+// Voltando para a sala (F5 ou queda) e o servidor ainda está reiniciando/acordando: tenta de novo sozinho
+let rejoinTries = 0;
+function joinFailed() {
+  if (document.documentElement.classList.contains('rejoining') && rejoinTries < 20) {
+    rejoinTries++;
+    setTimeout(join, 4000);
+    return;
+  }
+  showError('Não foi possível conectar ao servidor.');
+}
+
 async function join() {
   if (ws && ws.readyState <= WebSocket.OPEN) return; // evita entrar duas vezes (duplo clique)
-  // Servidor de sinalização: o configurado em config.js ou o mesmo domínio da página
-  const base = (window.SIGNAL_URL || location.origin).replace(/\/+$/, '');
+  $('#lobbyError').hidden = true;
+  setBusy(true);
+  // Servidor de sinalização: o configurado em config.js (produção) ou o mesmo domínio da página
+  const base = (isLocalHost ? location.origin : window.SIGNAL_URL || location.origin).replace(/\/+$/, '');
   try {
     const res = await fetch(`${base}/ice`);
     if (res.ok) iceServers = await res.json();
@@ -94,12 +121,10 @@ async function join() {
   ws = new WebSocket(base.replace(/^http/, 'ws'));
   ws.onopen = () => ws.send(JSON.stringify({ type: 'join', room: roomId, name: myName, cid: tabId() }));
   ws.onmessage = (e) => onServerMessage(JSON.parse(e.data));
-  ws.onerror = () => showError('Não foi possível conectar ao servidor.');
+  ws.onerror = joinFailed;
   ws.onclose = () => {
-    if (!$('#app').hidden) {
-      alert('Conexão com o servidor perdida.');
-      location.reload();
-    }
+    // conexão caiu com a sala aberta: recarrega, e o app volta para a mesma sala sozinho
+    if (!$('#app').hidden) location.reload();
   };
 }
 
@@ -112,17 +137,21 @@ function onServerMessage(msg) {
     case 'full':
       ws.onclose = null;
       ws.close();
+      clearSession();
       showError('Essa sala está cheia.');
       break;
     case 'replaced':
-      // esta aba foi substituída por outra igual (ex.: página recarregada)
+      // esta aba foi substituída por outra igual (ex.: aba duplicada)
       ws.onclose = null;
       ws.close();
+      clearSession();
       alert('Você entrou nesta sala em outra janela.');
       location.href = location.pathname;
       break;
     case 'joined':
       myId = msg.id;
+      saveSession(); // atualizar a página (F5) volta para esta sala
+      document.documentElement.classList.remove('rejoining');
       $('#lobby').hidden = true;
       $('#app').hidden = false;
       $('#roomName').textContent = roomId;
@@ -132,8 +161,10 @@ function onServerMessage(msg) {
       break;
     case 'peer-joined': {
       const existing = peers.get(msg.id);
-      if (existing) existing.name = msg.name;
-      else createPeer(msg.id, msg.name);
+      if (existing) {
+        existing.name = msg.name;
+        applyPeerVolumes(existing); // o volume salvo é por nome
+      } else createPeer(msg.id, msg.name);
       renderMembers();
       if (micOn) broadcast({ type: 'mic-state', on: true }); // quem chegou agora fica sabendo
       break;
@@ -245,6 +276,7 @@ function attachRemote(peer, stream) {
     video.playsInline = true;
     video.srcObject = stream;
     $('#sink').appendChild(video); // toca o áudio mesmo sem tile
+    video.play?.().catch(() => needUnlock()); // autoplay bloqueado (ex.: após atualizar a página)
     entry = { stream, video, tile: null };
     peer.streams.set(stream.id, entry);
     stream.onaddtrack = stream.onremovetrack = () => renderStream(peer, entry);
@@ -259,7 +291,7 @@ function renderStream(peer, entry) {
   const meterKey = `${peer.id}:${entry.stream.id}`;
 
   if (hasVideo && !entry.tile) {
-    entry.tile = makeTile(peer.name, entry.video, { remote: true });
+    entry.tile = makeTile(peer.name, entry.video, { remote: true, peer });
     $('#grid').appendChild(entry.tile);
   } else if (!hasVideo && entry.tile) {
     entry.tile.remove();
@@ -270,6 +302,7 @@ function renderStream(peer, entry) {
   if (!hasVideo && entry.stream.getAudioTracks().length) addMeter(meterKey, peer.id, entry.stream);
   else removeMeter(meterKey);
 
+  applyPeerVolumes(peer);
   renderMembers();
 }
 
@@ -284,7 +317,7 @@ function dropStream(peer, streamId) {
   renderMembers();
 }
 
-function makeTile(label, video, { remote }) {
+function makeTile(label, video, { remote, peer }) {
   const tile = document.createElement('div');
   tile.className = 'tile';
   tile.appendChild(video);
@@ -298,19 +331,32 @@ function makeTile(label, video, { remote }) {
   tools.className = 'tools';
 
   if (remote) {
-    const mute = document.createElement('button');
-    mute.className = 'btn';
-    setBtn(mute, 'volume', 'Silenciar');
-    mute.onclick = () => {
-      video.muted = !video.muted;
-      video.muted ? setBtn(mute, 'volume-off', 'Ativar som') : setBtn(mute, 'volume', 'Silenciar');
+    // Volume: botão aqui, ou botão direito / toque longo em qualquer parte da tela
+    const volBtn = document.createElement('button');
+    volBtn.className = 'btn';
+    setBtn(volBtn, 'volume', 'Volume');
+    volBtn.onclick = () => {
+      const r = volBtn.getBoundingClientRect();
+      openMenu(r.left, r.bottom + 6, peerMenu(peer));
     };
-    tools.appendChild(mute);
+    tools.appendChild(volBtn);
+    bindMenu(tile, () => peerMenu(peer));
   }
 
-  // Clicar na tela entra e sai da tela cheia
+  // Dois modos:
+  //  - Ampliar: esta tela ocupa sozinha o espaço de todas (como se só uma pessoa transmitisse)
+  //  - Tela cheia: o navegador inteiro mostra só esta tela
   const isFull = () => document.fullscreenElement === tile;
   const toggleFull = () => (isFull() ? document.exitFullscreen() : tile.requestFullscreen?.());
+  const toggleFocus = () => setFocus(focusedTile === tile ? null : tile);
+
+  const focus = document.createElement('button');
+  focus.className = 'btn focus-btn'; // escondido via CSS quando só há uma tela
+  tile._focusBtn = focus;
+  focus.onclick = toggleFocus;
+  tools.appendChild(focus);
+  setBtn(focus, 'arrows-diagonal', 'Ampliar');
+
   const full = document.createElement('button');
   full.className = 'btn';
   setBtn(full, 'arrows-maximize', 'Tela cheia');
@@ -318,11 +364,53 @@ function makeTile(label, video, { remote }) {
   tools.appendChild(full);
   tile.appendChild(tools);
 
-  video.onclick = toggleFull;
+  // Clique = ampliar/reduzir (ou sair da tela cheia). Duplo clique = tela cheia.
+  // O clique simples espera um instante para não disparar junto com o duplo clique.
+  let clickTimer = null;
+  video.onclick = () => {
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      return;
+    }
+    clickTimer = setTimeout(() => {
+      clickTimer = null;
+      isFull() ? document.exitFullscreen() : toggleFocus();
+    }, 220);
+  };
+  video.ondblclick = () => {
+    clearTimeout(clickTimer);
+    clickTimer = null;
+    toggleFull();
+  };
+
   tile.onfullscreenchange = () =>
     isFull() ? setBtn(full, 'arrows-minimize', 'Sair da tela cheia') : setBtn(full, 'arrows-maximize', 'Tela cheia');
   return tile;
 }
+
+// Modo "ampliar": só o tile escolhido aparece, ocupando toda a área
+let focusedTile = null;
+
+function setFocus(tile) {
+  focusedTile = tile;
+  $('#grid').classList.toggle('has-focus', !!tile);
+  document.querySelectorAll('#grid .tile').forEach((t) => {
+    const on = t === tile;
+    t.classList.toggle('focused', on);
+    if (t._focusBtn) on ? setBtn(t._focusBtn, 'arrows-diagonal-minimize-2', 'Reduzir') : setBtn(t._focusBtn, 'arrows-diagonal', 'Ampliar');
+  });
+}
+
+// Se a tela ampliada some (parou de compartilhar / saiu), volta para a grade
+// (ou se sobrou só uma tela: ampliar não faz sentido e esconderia a próxima transmissão que chegar)
+new MutationObserver(() => {
+  if (focusedTile && (!focusedTile.isConnected || $('#grid').querySelectorAll('.tile').length < 2)) setFocus(null);
+}).observe($('#grid'), { childList: true });
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && focusedTile && !document.fullscreenElement && !menuEl) setFocus(null);
+});
 
 /* ---------- Compartilhar tela ---------- */
 
@@ -453,13 +541,30 @@ function applyBitrate(pc) {
 
 $('#micBtn').onclick = async () => {
   if (!micStream) {
+    let raw;
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({
+      raw = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch (err) {
       alert('Não foi possível acessar o microfone: ' + err.message);
       return;
+    }
+    // O microfone passa por um controle de ganho (0–200%) antes de ser enviado
+    micStream = raw;
+    if (audioCtx) {
+      try {
+        await audioCtx.resume();
+        micGain = audioCtx.createGain();
+        micGain.gain.value = vol.get('self', 100) / 100;
+        const dest = audioCtx.createMediaStreamDestination();
+        audioCtx.createMediaStreamSource(raw).connect(micGain);
+        micGain.connect(dest);
+        micStream = dest.stream;
+      } catch (err) {
+        console.error(err);
+        micStream = raw;
+      }
     }
     for (const { pc } of peers.values()) micStream.getTracks().forEach((t) => pc.addTrack(t, micStream));
     addMeter('me', 'me', micStream);
@@ -562,6 +667,8 @@ function renderMembers() {
       live.innerHTML = '<i class="ti ti-broadcast"></i>AO VIVO';
       li.appendChild(live);
     }
+    li.title = 'Botão direito (ou segure) para ajustar o volume';
+    bindMenu(li, () => (m.id === 'me' ? selfMenu() : peers.has(m.id) ? peerMenu(peers.get(m.id)) : null));
     list.appendChild(li);
   }
   $('#count').textContent = everyone.length;
@@ -582,16 +689,337 @@ $('#copyLink').onclick = async () => {
 };
 
 // Sair volta para a tela inicial, já com o código desta sala (fácil de entrar de novo)
-$('#leaveBtn').onclick = () => {
+function leaveRoom() {
+  clearSession(); // sair de verdade: o F5 não deve te trazer de volta
   if (ws) ws.onclose = null;
   location.href = `${location.pathname}?room=${encodeURIComponent(roomId)}`;
-};
+}
 
-// Botão "voltar" do navegador também sai da sala
+// Modal de confirmação
+let modalReturnFocus = null;
+
+function openLeaveModal() {
+  const modal = $('#leaveModal');
+  if (!modal.hidden) return;
+  closeMenu();
+  document.fullscreenElement && document.exitFullscreen(); // o modal não apareceria em tela cheia
+  const lines = ['Você vai sair da chamada.'];
+  if (screenStream) lines.push('Sua transmissão será encerrada.');
+  $('#leaveText').textContent = lines.join(' ');
+  modalReturnFocus = document.activeElement;
+  modal.hidden = false;
+  $('#leaveCancel').focus(); // a opção segura vem focada
+}
+
+function closeLeaveModal() {
+  $('#leaveModal').hidden = true;
+  modalReturnFocus?.focus?.();
+}
+
+$('#leaveBtn').onclick = openLeaveModal;
+$('#leaveConfirm').onclick = leaveRoom;
+$('#leaveCancel').onclick = closeLeaveModal;
+$('#leaveModal').addEventListener('pointerdown', (e) => e.target === e.currentTarget && closeLeaveModal()); // clicar fora
+$('#leaveModal').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') return closeLeaveModal();
+  if (e.key !== 'Tab') return;
+  // mantém o foco dentro do modal
+  const first = $('#leaveCancel');
+  const last = $('#leaveConfirm');
+  if (e.shiftKey && document.activeElement === first) (e.preventDefault(), last.focus());
+  else if (!e.shiftKey && document.activeElement === last) (e.preventDefault(), first.focus());
+});
+
+// Botão "voltar" do navegador também pede confirmação (fica na sala até confirmar)
 window.addEventListener('popstate', () => {
   if ($('#app').hidden) return;
-  if (ws) ws.onclose = null;
-  location.reload();
+  history.pushState(null, '', location.href);
+  openLeaveModal();
 });
 
 window.addEventListener('pagehide', () => ws?.close());
+
+/* ---------- Volume: botão direito / toque longo ---------- */
+
+// Volumes lembrados neste navegador (por nome da pessoa)
+const vol = {
+  get(key, def = 100) {
+    try {
+      const v = localStorage.getItem('vol:' + key);
+      return v == null ? def : Number(v);
+    } catch {
+      return def;
+    }
+  },
+  set(key, v) {
+    try {
+      localStorage.setItem('vol:' + key, String(v));
+    } catch {}
+  },
+};
+
+// Voz (stream só com áudio) e transmissão (stream com vídeo) têm volumes separados
+function applyPeerVolumes(peer) {
+  for (const entry of peer.streams.values()) {
+    const isScreen = entry.stream.getVideoTracks().length > 0;
+    entry.video.volume = vol.get(`${isScreen ? 'stream' : 'voice'}:${peer.name}`) / 100;
+  }
+}
+
+function peerMenu(peer) {
+  const rows = [
+    {
+      label: 'Voz',
+      icons: ['microphone', 'microphone-off'],
+      value: vol.get(`voice:${peer.name}`),
+      max: 100,
+      onChange: (v) => {
+        vol.set(`voice:${peer.name}`, v);
+        applyPeerVolumes(peer);
+      },
+    },
+  ];
+  if ([...peer.streams.values()].some((s) => s.tile)) {
+    rows.push({
+      label: 'Transmissão',
+      icons: ['volume', 'volume-off'],
+      value: vol.get(`stream:${peer.name}`),
+      max: 100,
+      onChange: (v) => {
+        vol.set(`stream:${peer.name}`, v);
+        applyPeerVolumes(peer);
+      },
+    });
+  }
+  return { title: peer.name, rows };
+}
+
+function selfMenu() {
+  return {
+    title: 'Meu microfone',
+    rows: [
+      {
+        label: 'Volume de saída',
+        icons: ['microphone', 'microphone-off'],
+        value: vol.get('self', 100),
+        max: 200, // dá para aumentar se você fala baixo
+        onChange: (v) => {
+          vol.set('self', v);
+          if (micGain) micGain.gain.value = v / 100;
+        },
+      },
+    ],
+  };
+}
+
+let menuEl = null;
+
+function closeMenu() {
+  menuEl?.remove();
+  menuEl = null;
+  document.removeEventListener('pointerdown', onMenuOutside, true);
+  document.removeEventListener('keydown', onMenuKey);
+  window.removeEventListener('resize', closeMenu);
+}
+const onMenuOutside = (e) => menuEl && !menuEl.contains(e.target) && closeMenu();
+const onMenuKey = (e) => e.key === 'Escape' && closeMenu();
+
+function openMenu(x, y, { title, rows }) {
+  closeMenu();
+  const el = document.createElement('div');
+  el.className = 'vol-menu';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-label', `Volume: ${title}`);
+
+  const head = document.createElement('div');
+  head.className = 'vol-title';
+  head.textContent = title;
+  el.appendChild(head);
+  rows.forEach((r) => el.appendChild(volRow(r)));
+
+  // em tela cheia só o elemento em tela cheia aparece, então o menu vai dentro dele
+  (document.fullscreenElement || document.body).appendChild(el);
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  el.style.left = `${Math.max(8, Math.min(x, innerWidth - w - 8))}px`;
+  el.style.top = `${Math.max(8, Math.min(y, innerHeight - h - 8))}px`;
+
+  menuEl = el;
+  document.addEventListener('pointerdown', onMenuOutside, true);
+  document.addEventListener('keydown', onMenuKey);
+  window.addEventListener('resize', closeMenu);
+}
+
+function volRow({ label, icons, value, max, onChange }) {
+  const row = document.createElement('div');
+  row.className = 'vol-row';
+
+  const top = document.createElement('div');
+  top.className = 'vol-top';
+  const name = document.createElement('span');
+  name.textContent = label;
+  const pct = document.createElement('span');
+  pct.className = 'vol-pct';
+  top.append(name, pct);
+
+  const ctl = document.createElement('div');
+  ctl.className = 'vol-ctl';
+  const mute = document.createElement('button');
+  mute.type = 'button';
+  mute.className = 'icon-btn';
+  const range = document.createElement('input');
+  range.type = 'range';
+  range.min = 0;
+  range.max = max;
+  range.step = 1;
+  range.value = Math.min(value, max);
+  range.setAttribute('aria-label', `Volume: ${label}`);
+
+  let last = +range.value > 0 ? +range.value : 100; // volume para voltar ao tirar o mudo
+  const paint = () => {
+    const v = +range.value;
+    pct.textContent = v === 0 ? 'Mudo' : `${v}%`;
+    mute.innerHTML = `<i class="ti ti-${v === 0 ? icons[1] : icons[0]}"></i>`;
+    mute.classList.toggle('is-muted', v === 0);
+    mute.title = v === 0 ? 'Ativar som' : 'Silenciar';
+    mute.setAttribute('aria-label', mute.title);
+    range.style.setProperty('--fill', `${(v / max) * 100}%`);
+  };
+  const set = (v) => {
+    range.value = v;
+    if (v > 0) last = v;
+    paint();
+    onChange(v);
+  };
+  range.oninput = () => set(+range.value);
+  mute.onclick = () => set(+range.value > 0 ? 0 : last);
+  paint();
+
+  ctl.append(mute, range);
+  row.append(top, ctl);
+  return row;
+}
+
+// Abre o menu com botão direito (mouse) ou segurando ~0,5s (celular/tablet)
+function bindMenu(el, getMenu) {
+  const open = (x, y) => {
+    const m = getMenu();
+    if (m) openMenu(x, y, m);
+  };
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    open(e.clientX, e.clientY);
+  });
+
+  let timer = null;
+  let fired = false;
+  let sx = 0;
+  let sy = 0;
+  const cancel = () => {
+    clearTimeout(timer);
+    timer = null;
+  };
+  el.addEventListener(
+    'touchstart',
+    (e) => {
+      cancel();
+      fired = false;
+      sx = e.touches[0].clientX;
+      sy = e.touches[0].clientY;
+      timer = setTimeout(() => {
+        fired = true;
+        navigator.vibrate?.(15);
+        open(sx, sy);
+      }, 500);
+    },
+    { passive: true }
+  );
+  el.addEventListener(
+    'touchmove',
+    (e) => {
+      const t = e.touches[0];
+      if (Math.hypot(t.clientX - sx, t.clientY - sy) > 10) cancel(); // virou rolagem
+    },
+    { passive: true }
+  );
+  el.addEventListener(
+    'touchend',
+    (e) => {
+      cancel();
+      if (fired) {
+        e.preventDefault(); // não deixa o toque virar clique (tela cheia / ligar microfone)
+        fired = false;
+      }
+    },
+    { passive: false }
+  );
+  el.addEventListener('touchcancel', cancel);
+}
+
+bindMenu($('#micBtn'), selfMenu);
+
+/* ---------- Atualizar a página (F5) mantém você na sala ---------- */
+
+function saveSession() {
+  try {
+    sessionStorage.setItem('session', JSON.stringify({ room: roomId, name: myName }));
+  } catch {}
+}
+function clearSession() {
+  try {
+    sessionStorage.removeItem('session');
+  } catch {}
+}
+
+// Depois de recarregar, o navegador pode deixar o áudio suspenso até a primeira interação.
+// Libera sozinho, sem aviso, no primeiro clique ou tecla.
+function armSilentUnlock() {
+  const events = ['pointerdown', 'keydown'];
+  const go = () => {
+    audioCtx?.resume();
+    peers.forEach((p) => p.streams.forEach((s) => s.video.play().catch(() => {})));
+    events.forEach((t) => document.removeEventListener(t, go, true));
+  };
+  events.forEach((t) => document.addEventListener(t, go, true));
+}
+
+// O aviso só aparece se o navegador bloquear de verdade o som/vídeo de alguém (play() rejeitado).
+let unlockBanner = null;
+function needUnlock() {
+  if (unlockBanner) return;
+  unlockBanner = document.createElement('button');
+  unlockBanner.type = 'button';
+  unlockBanner.className = 'unlock';
+  unlockBanner.innerHTML = '<i class="ti ti-volume"></i><span>Clique aqui para ativar o som e o vídeo</span>';
+  document.body.appendChild(unlockBanner);
+
+  const go = () => {
+    audioCtx?.resume();
+    peers.forEach((p) => p.streams.forEach((s) => s.video.play().catch(() => {})));
+    unlockBanner?.remove();
+    unlockBanner = null;
+    document.removeEventListener('pointerdown', go, true);
+  };
+  document.addEventListener('pointerdown', go, true);
+}
+
+// Se esta aba já estava numa sala (e o endereço é o da mesma sala), volta para ela sozinho
+(function autoRejoin() {
+  let saved = null;
+  try {
+    saved = JSON.parse(sessionStorage.getItem('session') || 'null');
+  } catch {}
+  const urlRoom = (params.get('room') || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  if (!saved || !saved.name || saved.room !== urlRoom) {
+    document.documentElement.classList.remove('rejoining');
+    return;
+  }
+
+  myName = saved.name;
+  roomId = saved.room;
+  try {
+    audioCtx = new AudioContext(); // sem clique pode ficar suspenso
+    if (audioCtx.state === 'suspended') armSilentUnlock();
+  } catch {}
+  join();
+})();

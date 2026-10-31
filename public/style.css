@@ -171,6 +171,82 @@ select { width: auto; cursor: pointer; }
   font-weight: 700; color: #fff;
 }
 .mute-icon { color: #f23f43; font-size: 17px; flex: none; }
+
+/* Não selecionar texto / abrir menu nativo ao segurar */
+.members li, .tile, #micBtn { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+
+/* Voltando para a sala (F5): sem tela de entrada, só um aviso discreto */
+.rejoin { display: none; }
+html.rejoining #lobby { display: none; }
+html.rejoining .rejoin {
+  min-height: 100vh; min-height: 100dvh;
+  display: grid; place-content: center; justify-items: center; gap: 12px;
+  color: var(--muted); font-weight: 600;
+}
+html.rejoining .rejoin .ti { font-size: 32px; color: var(--blurple); }
+
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
+
+/* Aviso: clique para liberar áudio/vídeo (autoplay bloqueado) */
+.unlock {
+  position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 1500;
+  display: inline-flex; align-items: center; gap: 8px;
+  max-width: calc(100% - 24px);
+  background: var(--blurple); color: #fff; border: 0; border-radius: 999px;
+  padding: 10px 18px; font: inherit; font-weight: 600; cursor: pointer;
+  box-shadow: 0 8px 24px rgb(0 0 0 / .45);
+}
+.unlock:hover { background: var(--blurple-h); }
+.unlock .ti { font-size: 20px; }
+
+/* Modal de confirmação */
+.modal {
+  position: fixed; inset: 0; z-index: 2000;
+  display: grid; place-items: center; padding: 16px;
+  background: rgb(0 0 0 / .62); backdrop-filter: blur(3px);
+  animation: fade .12s ease-out;
+}
+.modal-card {
+  width: min(400px, 100%);
+  background: var(--bg); border: 1px solid rgb(255 255 255 / .08);
+  border-radius: 16px; padding: 24px;
+  display: grid; gap: 10px; justify-items: start;
+  box-shadow: 0 24px 60px rgb(0 0 0 / .55);
+  animation: pop .14s ease-out;
+}
+.modal-card h2 { margin: 0; font-size: 20px; }
+.modal-card p { margin: 0; line-height: 1.5; }
+.modal-icon {
+  width: 44px; height: 44px; display: grid; place-items: center;
+  border-radius: 12px; background: rgb(218 55 60 / .16); color: #ff8a8d; font-size: 24px;
+  margin-bottom: 4px;
+}
+.modal-actions { justify-self: stretch; display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.97); } }
+@media (prefers-reduced-motion: reduce) { .modal, .modal-card { animation: none; } }
+@media (max-width: 520px) { .modal-actions .btn { flex: 1; } }
+
+/* Menu de volume */
+.vol-menu {
+  position: fixed; z-index: 1000;
+  width: 260px; padding: 12px;
+  background: #111214; border: 1px solid rgb(255 255 255 / .08);
+  border-radius: 12px; box-shadow: 0 12px 32px rgb(0 0 0 / .55);
+  display: grid; gap: 12px;
+}
+.vol-title { font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vol-row { display: grid; gap: 6px; }
+.vol-top { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--muted); }
+.vol-pct { font-variant-numeric: tabular-nums; }
+.vol-ctl { display: flex; align-items: center; gap: 8px; }
+.vol-ctl .icon-btn.is-muted { color: #f23f43; }
+.vol-ctl input[type="range"] {
+  flex: 1; min-width: 0; height: 28px; padding: 0; background: transparent;
+  accent-color: var(--blurple); cursor: pointer;
+}
 .avatar { transition: box-shadow .12s; }
 .members li.speaking .avatar { box-shadow: 0 0 0 2px var(--side), 0 0 0 4px var(--green); }
 .members .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
@@ -203,6 +279,11 @@ select { width: auto; cursor: pointer; }
   min-height: 200px;
 }
 .tile video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; cursor: pointer; }
+/* Ampliar: a tela escolhida ocupa sozinha todo o espaço da grade */
+.grid.has-focus { grid-template-columns: minmax(0, 1fr); }
+.grid:not(:has(.tile ~ .tile)) .focus-btn { display: none; } /* uma tela só: nada para ampliar */
+.grid.has-focus .tile:not(.focused) { display: none; } /* o áudio continua tocando */
+.grid.has-focus .tile.focused video { cursor: zoom-out; }
 .tile:fullscreen { border-radius: 0; }
 .tile:fullscreen video { cursor: zoom-out; }
 .tile .label {
